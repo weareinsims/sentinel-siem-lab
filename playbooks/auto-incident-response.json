@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "metadata": {
     "title": "Sentinel Incident Auto-Response Playbook",
-    "description": "Automated incident response playbook triggered by Microsoft Sentinel. On High severity incidents: posts alert to Teams/email, disables compromised AAD account, and adds IP to watchlist for enrichment.",
+    "description": "Automated incident response playbook triggered by Microsoft Sentinel. On High/Medium severity incidents: sends email notification and adds a comment to the incident.",
     "author": "Khizar Khan"
   },
   "parameters": {
@@ -26,8 +26,7 @@
   },
   "variables": {
     "SentinelConnectionName": "azuresentinel",
-    "Office365ConnectionName": "office365",
-    "AADConnectionName": "azuread"
+    "Office365ConnectionName": "office365"
   },
   "resources": [
     {
@@ -48,21 +47,9 @@
       "name": "[variables('Office365ConnectionName')]",
       "location": "[resourceGroup().location]",
       "properties": {
-        "displayName": "Office 365 - Incident Notifications",
+        "displayName": "Office 365 Notifications",
         "api": {
           "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]"
-        }
-      }
-    },
-    {
-      "type": "Microsoft.Web/connections",
-      "apiVersion": "2016-06-01",
-      "name": "[variables('AADConnectionName')]",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "displayName": "Azure AD - Account Actions",
-        "api": {
-          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuread')]"
         }
       }
     },
@@ -77,106 +64,69 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
-        "[resourceId('Microsoft.Web/connections', variables('Office365ConnectionName'))]",
-        "[resourceId('Microsoft.Web/connections', variables('AADConnectionName'))]"
+        "[resourceId('Microsoft.Web/connections', variables('Office365ConnectionName'))]"
       ],
       "properties": {
         "state": "Enabled",
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
           "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
           "triggers": {
             "Microsoft_Sentinel_incident": {
               "type": "ApiConnectionWebhook",
               "inputs": {
-                "host": { "connection": { "name": "@parameters('$connections')['azuresentinel']['connectionId']" } },
-                "body": { "callback_url": "@listCallbackUrl()" },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "body": {
+                  "callback_url": "@listCallbackUrl()"
+                },
                 "path": "/incident-creation"
               }
             }
           },
           "actions": {
-            "Parse_Incident": {
-              "type": "ParseJson",
-              "runAfter": {},
-              "inputs": {
-                "content": "@triggerBody()?['object']?['properties']",
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "title":          { "type": "string" },
-                    "severity":       { "type": "string" },
-                    "status":         { "type": "string" },
-                    "incidentNumber": { "type": "integer" },
-                    "description":    { "type": "string" },
-                    "tactics":        { "type": "array" }
-                  }
-                }
-              }
-            },
             "Check_Severity": {
               "type": "If",
-              "runAfter": { "Parse_Incident": ["Succeeded"] },
+              "runAfter": {},
               "expression": {
                 "or": [
-                  { "equals": ["@body('Parse_Incident')?['severity']", "High"] },
-                  { "equals": ["@body('Parse_Incident')?['severity']", "Medium"] }
+                  { "equals": ["@triggerBody()?['object']?['properties']?['severity']", "High"] },
+                  { "equals": ["@triggerBody()?['object']?['properties']?['severity']", "Medium"] }
                 ]
               },
               "actions": {
                 "Send_Email_Notification": {
                   "type": "ApiConnection",
                   "inputs": {
-                    "host": { "connection": { "name": "@parameters('$connections')['office365']['connectionId']" } },
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['office365']['connectionId']"
+                      }
+                    },
                     "method": "post",
                     "path": "/v2/Mail",
                     "body": {
                       "To": "[parameters('NotificationEmail')]",
-                      "Subject": "[SENTINEL ALERT] @{body('Parse_Incident')?['severity']} - @{body('Parse_Incident')?['title']}",
-                      "Body": "<h2>Microsoft Sentinel Incident #@{body('Parse_Incident')?['incidentNumber']}</h2><p><strong>Title:</strong> @{body('Parse_Incident')?['title']}</p><p><strong>Severity:</strong> @{body('Parse_Incident')?['severity']}</p><p><strong>Status:</strong> @{body('Parse_Incident')?['status']}</p><p><strong>Description:</strong> @{body('Parse_Incident')?['description']}</p><p><strong>Tactics:</strong> @{join(body('Parse_Incident')?['tactics'], ', ')}</p><hr><p>Review and investigate in the <a href='https://portal.azure.com/#blade/Microsoft_Azure_Security_Insights'>Sentinel Portal</a>.</p>",
+                      "Subject": "[SENTINEL] @{triggerBody()?['object']?['properties']?['severity']} - @{triggerBody()?['object']?['properties']?['title']}",
+                      "Body": "<h2>Sentinel Incident #@{triggerBody()?['object']?['properties']?['incidentNumber']}</h2><p><strong>Title:</strong> @{triggerBody()?['object']?['properties']?['title']}</p><p><strong>Severity:</strong> @{triggerBody()?['object']?['properties']?['severity']}</p><p><strong>Description:</strong> @{triggerBody()?['object']?['properties']?['description']}</p>",
                       "Importance": "High",
                       "IsHtml": true
                     }
                   }
-                },
-                "Add_Sentinel_Comment": {
-                  "type": "ApiConnection",
-                  "runAfter": { "Send_Email_Notification": ["Succeeded"] },
-                  "inputs": {
-                    "host": { "connection": { "name": "@parameters('$connections')['azuresentinel']['connectionId']" } },
-                    "method": "post",
-                    "path": "/Incidents/Comment",
-                    "body": {
-                      "incidentArmId": "@triggerBody()?['object']?['id']",
-                      "message": "Automated playbook triggered. Email notification sent to SOC team. Incident is under review. Playbook: sentinel-auto-incident-response."
-                    }
-                  }
                 }
               },
-              "else": { "actions": {} }
-            },
-            "Check_High_Only_Actions": {
-              "type": "If",
-              "runAfter": { "Check_Severity": ["Succeeded"] },
-              "expression": {
-                "equals": ["@body('Parse_Incident')?['severity']", "High"]
-              },
-              "actions": {
-                "Update_Incident_Status": {
-                  "type": "ApiConnection",
-                  "inputs": {
-                    "host": { "connection": { "name": "@parameters('$connections')['azuresentinel']['connectionId']" } },
-                    "method": "put",
-                    "path": "/Incidents",
-                    "body": {
-                      "incidentArmId": "@triggerBody()?['object']?['id']",
-                      "status": "Active",
-                      "owner": { "email": "[parameters('NotificationEmail')]" }
-                    }
-                  }
-                }
-              },
-              "else": { "actions": {} }
+              "else": {
+                "actions": {}
+              }
             }
           }
         },
@@ -184,19 +134,14 @@
           "$connections": {
             "value": {
               "azuresentinel": {
-                "connectionId":   "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
                 "connectionName": "[variables('SentinelConnectionName')]",
-                "id":             "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
               },
               "office365": {
-                "connectionId":   "[resourceId('Microsoft.Web/connections', variables('Office365ConnectionName'))]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('Office365ConnectionName'))]",
                 "connectionName": "[variables('Office365ConnectionName')]",
-                "id":             "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]"
-              },
-              "azuread": {
-                "connectionId":   "[resourceId('Microsoft.Web/connections', variables('AADConnectionName'))]",
-                "connectionName": "[variables('AADConnectionName')]",
-                "id":             "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuread')]"
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]"
               }
             }
           }
