@@ -1,0 +1,39 @@
+{
+  "displayName": "Suspicious PowerShell Execution - Obfuscation or Download Cradle",
+  "description": "Detects PowerShell commands commonly associated with malicious activity including encoded commands, download cradles, AMSI bypass attempts, and execution policy bypass. Monitors Windows Security Event ID 4104 (Script Block Logging).",
+  "severity": "Medium",
+  "enabled": true,
+  "query": "// Requires PowerShell Script Block Logging (Event ID 4104)\n// Enable via GPO: Computer Config > Admin Templates > Windows Components > PowerShell\nlet suspiciousTerms = dynamic([\n    // Download cradles\n    \"DownloadString\",\n    \"DownloadFile\",\n    \"Invoke-WebRequest\",\n    \"iwr\",\n    \"wget\",\n    \"curl\",\n    \"Net.WebClient\",\n    // Obfuscation / encoding\n    \"-EncodedCommand\",\n    \"-enc\",\n    \"-ec\",\n    \"[Convert]::FromBase64String\",\n    \"FromBase64String\",\n    // Execution bypass\n    \"-ExecutionPolicy Bypass\",\n    \"-ep bypass\",\n    \"Set-ExecutionPolicy\",\n    // Code injection / reflection\n    \"Invoke-Expression\",\n    \"IEX(\",\n    \"IEX (\",\n    \"[Reflection.Assembly]::Load\",\n    \"[System.Reflection.Assembly]::Load\",\n    // AMSI bypass\n    \"AmsiUtils\",\n    \"amsiInitFailed\",\n    \"amsiContext\",\n    // Credential dumping\n    \"sekurlsa\",\n    \"mimikatz\",\n    \"Invoke-Mimikatz\",\n    \"Get-GPPPassword\",\n    // Persistence\n    \"New-ScheduledTask\",\n    \"schtasks\",\n    \"New-ItemProperty.*Run\"\n]);\nEvent\n| where TimeGenerated > ago(1d)\n| where Source == \"Microsoft-Windows-PowerShell\"\n| where EventID == 4104\n| extend ScriptBlock = tostring(EventData)\n| where ScriptBlock has_any (suspiciousTerms)\n// Filter out known-good admin scripts (tune per environment)\n| where ScriptBlock !has \"WindowsDefender\"\n| where ScriptBlock !has \"Microsoft.PowerShell.Management\"\n| extend\n    MatchedTerm = extract(strcat(\"(\", strcat_array(suspiciousTerms, \"|\"), \")\"), 1, ScriptBlock),\n    Computer    = Computer,\n    EventTime   = TimeGenerated\n// Extract account from EventData if available\n| extend Account = extract(@'SubjectUserName\">(.*?)<', 1, tostring(ParameterXml))\n| project\n    TimeGenerated = EventTime,\n    Computer,\n    Account,\n    MatchedTerm,\n    ScriptBlockPreview = substring(ScriptBlock, 0, 500)\n| sort by TimeGenerated desc",
+  "queryFrequency": "PT1H",
+  "queryPeriod": "P1D",
+  "triggerOperator": "GreaterThan",
+  "triggerThreshold": 0,
+  "suppressionDuration": "PT2H",
+  "suppressionEnabled": false,
+  "tactics": ["Execution", "DefenseEvasion", "CredentialAccess"],
+  "techniques": ["T1059.001", "T1027", "T1562.001"],
+  "alertDetailsOverride": {
+    "alertDisplayNameFormat": "Suspicious PowerShell on {{Computer}}: matched '{{MatchedTerm}}'",
+    "alertDescriptionFormat": "Suspicious PowerShell execution detected on {{Computer}}. Matched indicator: {{MatchedTerm}}. Script preview: {{ScriptBlockPreview}}"
+  },
+  "incidentConfiguration": {
+    "createIncident": true,
+    "groupingConfiguration": {
+      "enabled": true,
+      "reopenClosedIncident": false,
+      "lookbackDuration": "PT2H",
+      "matchingMethod": "Selected",
+      "groupByEntities": ["Host"]
+    }
+  },
+  "entityMappings": [
+    {
+      "entityType": "Host",
+      "fieldMappings": [{ "identifier": "HostName", "columnName": "Computer" }]
+    },
+    {
+      "entityType": "Account",
+      "fieldMappings": [{ "identifier": "Name", "columnName": "Account" }]
+    }
+  ]
+}

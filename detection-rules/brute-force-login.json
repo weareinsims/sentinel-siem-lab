@@ -1,0 +1,39 @@
+{
+  "displayName": "Brute Force Attack - Multiple Failed Logins",
+  "description": "Detects brute force attacks by identifying accounts with 10 or more failed login attempts within a 1-hour window from the same IP address. Covers both Windows Security Events (Event ID 4625) and Azure AD Sign-in logs.",
+  "severity": "High",
+  "enabled": true,
+  "query": "let threshold = 10;\nlet timeWindow = 1h;\n// Windows failed logins (Event ID 4625)\nlet windowsFailed = SecurityEvent\n| where TimeGenerated > ago(timeWindow)\n| where EventID == 4625\n| where AccountType == \"User\"\n| summarize\n    FailedAttempts = count(),\n    FirstAttempt   = min(TimeGenerated),\n    LastAttempt    = max(TimeGenerated),\n    TargetAccounts = make_set(TargetUserName, 10)\n    by IpAddress, Computer\n| where FailedAttempts >= threshold\n| extend\n    Source     = \"Windows Security Event\",\n    AccountKey = IpAddress;\n// Azure AD failed sign-ins\nlet aadFailed = SigninLogs\n| where TimeGenerated > ago(timeWindow)\n| where ResultType != \"0\"\n| where ResultDescription !has \"MFA\"\n| summarize\n    FailedAttempts = count(),\n    FirstAttempt   = min(TimeGenerated),\n    LastAttempt    = max(TimeGenerated),\n    TargetAccounts = make_set(UserPrincipalName, 10)\n    by IPAddress, AppDisplayName\n| where FailedAttempts >= threshold\n| extend\n    Source     = \"Azure AD Sign-in\",\n    IpAddress  = IPAddress,\n    Computer   = AppDisplayName,\n    AccountKey = IPAddress;\n// Union both sources\nunion windowsFailed, aadFailed\n| project\n    TimeGenerated  = LastAttempt,\n    Source,\n    IpAddress,\n    Computer,\n    FailedAttempts,\n    FirstAttempt,\n    LastAttempt,\n    TargetAccounts\n| sort by FailedAttempts desc",
+  "queryFrequency": "PT1H",
+  "queryPeriod": "PT1H",
+  "triggerOperator": "GreaterThan",
+  "triggerThreshold": 0,
+  "suppressionDuration": "PT1H",
+  "suppressionEnabled": false,
+  "tactics": ["CredentialAccess", "InitialAccess"],
+  "techniques": ["T1110", "T1110.001"],
+  "alertDetailsOverride": {
+    "alertDisplayNameFormat": "Brute Force Detected: {{FailedAttempts}} failed logins from {{IpAddress}}",
+    "alertDescriptionFormat": "{{FailedAttempts}} failed login attempts detected from IP {{IpAddress}} targeting accounts: {{TargetAccounts}}"
+  },
+  "incidentConfiguration": {
+    "createIncident": true,
+    "groupingConfiguration": {
+      "enabled": true,
+      "reopenClosedIncident": false,
+      "lookbackDuration": "PT5H",
+      "matchingMethod": "Selected",
+      "groupByEntities": ["IP"]
+    }
+  },
+  "entityMappings": [
+    {
+      "entityType": "IP",
+      "fieldMappings": [{ "identifier": "Address", "columnName": "IpAddress" }]
+    },
+    {
+      "entityType": "Host",
+      "fieldMappings": [{ "identifier": "HostName", "columnName": "Computer" }]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "displayName": "Privilege Escalation - User Added to Privileged Group",
+  "description": "Detects when a user account is added to a high-privilege Active Directory or Azure AD group (Domain Admins, Enterprise Admins, Global Administrators, etc.). Covers both on-prem AD events and Azure AD audit logs.",
+  "severity": "High",
+  "enabled": true,
+  "query": "let privilegedGroups = dynamic([\n    \"Domain Admins\",\n    \"Enterprise Admins\",\n    \"Schema Admins\",\n    \"Administrators\",\n    \"Account Operators\",\n    \"Backup Operators\",\n    \"Print Operators\",\n    \"Server Operators\",\n    \"Group Policy Creator Owners\"\n]);\nlet privilegedAadRoles = dynamic([\n    \"Global Administrator\",\n    \"Privileged Role Administrator\",\n    \"Security Administrator\",\n    \"Exchange Administrator\",\n    \"SharePoint Administrator\",\n    \"Helpdesk Administrator\",\n    \"User Administrator\"\n]);\n// On-prem AD: member added to security group\nlet adEvents = SecurityEvent\n| where TimeGenerated > ago(1d)\n| where EventID in (4728, 4732, 4756) // global/local/universal security group member add\n| extend\n    ActorAccount  = SubjectUserName,\n    TargetAccount = MemberName,\n    GroupName     = TargetUserName,\n    Source        = \"Active Directory\"\n| where GroupName in~ (privilegedGroups)\n| project\n    TimeGenerated,\n    Source,\n    ActorAccount,\n    TargetAccount,\n    GroupOrRole = GroupName,\n    Computer,\n    EventID;\n// Azure AD: role assignment events\nlet aadEvents = AuditLogs\n| where TimeGenerated > ago(1d)\n| where OperationName in (\"Add member to role\", \"Add member to role completed (PIM activation)\")\n| where Result == \"success\"\n| extend\n    ActorAccount  = tostring(InitiatedBy.user.userPrincipalName),\n    TargetAccount = tostring(TargetResources[0].userPrincipalName),\n    GroupOrRole   = tostring(TargetResources[1].displayName),\n    Source        = \"Azure AD\"\n| where GroupOrRole in~ (privilegedAadRoles)\n| project\n    TimeGenerated,\n    Source,\n    ActorAccount,\n    TargetAccount,\n    GroupOrRole,\n    Computer = \"\",\n    EventID  = 0;\nunion adEvents, aadEvents\n| project\n    TimeGenerated,\n    Source,\n    ActorAccount,\n    TargetAccount,\n    GroupOrRole,\n    Computer\n| sort by TimeGenerated desc",
+  "queryFrequency": "PT1H",
+  "queryPeriod": "P1D",
+  "triggerOperator": "GreaterThan",
+  "triggerThreshold": 0,
+  "suppressionDuration": "PT1H",
+  "suppressionEnabled": false,
+  "tactics": ["PrivilegeEscalation", "Persistence"],
+  "techniques": ["T1078.002", "T1098"],
+  "alertDetailsOverride": {
+    "alertDisplayNameFormat": "Privilege Escalation: {{TargetAccount}} added to {{GroupOrRole}} by {{ActorAccount}}",
+    "alertDescriptionFormat": "{{TargetAccount}} was added to the privileged group/role '{{GroupOrRole}}' by {{ActorAccount}} via {{Source}}."
+  },
+  "incidentConfiguration": {
+    "createIncident": true,
+    "groupingConfiguration": {
+      "enabled": true,
+      "reopenClosedIncident": true,
+      "lookbackDuration": "PT6H",
+      "matchingMethod": "Selected",
+      "groupByEntities": ["Account"]
+    }
+  },
+  "entityMappings": [
+    {
+      "entityType": "Account",
+      "fieldMappings": [{ "identifier": "Name", "columnName": "TargetAccount" }]
+    },
+    {
+      "entityType": "Account",
+      "fieldMappings": [{ "identifier": "Name", "columnName": "ActorAccount" }]
+    },
+    {
+      "entityType": "Host",
+      "fieldMappings": [{ "identifier": "HostName", "columnName": "Computer" }]
+    }
+  ]
+}

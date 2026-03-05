@@ -1,0 +1,39 @@
+{
+  "displayName": "Impossible Travel - Sign-in from Multiple Geographic Locations",
+  "description": "Detects when a user account signs in from two geographically distant locations within a time window that makes physical travel impossible (< 60 minutes between locations in different countries). This may indicate credential compromise or VPN abuse.",
+  "severity": "Medium",
+  "enabled": true,
+  "query": "let travelWindow = 60; // minutes\nlet excludedCountries = dynamic([\"\" ]); // add trusted VPN exit countries if needed\nSigninLogs\n| where TimeGenerated > ago(1d)\n| where ResultType == \"0\" // successful sign-ins only\n| where isnotempty(Location)\n| project\n    TimeGenerated,\n    UserPrincipalName,\n    UserId,\n    IPAddress,\n    Location,\n    CountryOrRegion = tostring(LocationDetails.countryOrRegion),\n    City            = tostring(LocationDetails.city),\n    Latitude        = toreal(GeoCoordinates.latitude),\n    Longitude       = toreal(GeoCoordinates.longitude),\n    AppDisplayName,\n    DeviceDetail\n| where CountryOrRegion !in (excludedCountries)\n| sort by UserPrincipalName asc, TimeGenerated asc\n| serialize\n| extend\n    PrevUser      = prev(UserPrincipalName, 1),\n    PrevTime      = prev(TimeGenerated, 1),\n    PrevCountry   = prev(CountryOrRegion, 1),\n    PrevCity      = prev(City, 1),\n    PrevIP        = prev(IPAddress, 1),\n    PrevLat       = prev(Latitude, 1),\n    PrevLon       = prev(Longitude, 1)\n| where UserPrincipalName == PrevUser\n| extend TimeDiffMinutes = datetime_diff('minute', TimeGenerated, PrevTime)\n| where TimeDiffMinutes between (1 .. travelWindow)\n| where CountryOrRegion != PrevCountry\n// Approximate distance using Haversine-like comparison on lat/lon delta\n| extend LatDelta = abs(Latitude - PrevLat), LonDelta = abs(Longitude - PrevLon)\n| where LatDelta > 2 or LonDelta > 2 // filter same-region noise\n| project\n    TimeGenerated,\n    UserPrincipalName,\n    CurrentCountry  = CountryOrRegion,\n    CurrentCity     = City,\n    CurrentIP       = IPAddress,\n    PreviousCountry = PrevCountry,\n    PreviousCity    = PrevCity,\n    PreviousIP      = PrevIP,\n    TimeDiffMinutes,\n    AppDisplayName\n| extend AlertDetail = strcat(\"Sign-in from \", CurrentCountry, \" (\", CurrentCity, \") only \", TimeDiffMinutes, \" minutes after sign-in from \", PreviousCountry, \" (\", PreviousCity, \")\")",
+  "queryFrequency": "PT1H",
+  "queryPeriod": "P1D",
+  "triggerOperator": "GreaterThan",
+  "triggerThreshold": 0,
+  "suppressionDuration": "PT4H",
+  "suppressionEnabled": false,
+  "tactics": ["InitialAccess", "CredentialAccess"],
+  "techniques": ["T1078", "T1078.004"],
+  "alertDetailsOverride": {
+    "alertDisplayNameFormat": "Impossible Travel: {{UserPrincipalName}} in {{PreviousCountry}} then {{CurrentCountry}} within {{TimeDiffMinutes}} min",
+    "alertDescriptionFormat": "{{AlertDetail}}"
+  },
+  "incidentConfiguration": {
+    "createIncident": true,
+    "groupingConfiguration": {
+      "enabled": true,
+      "reopenClosedIncident": false,
+      "lookbackDuration": "PT4H",
+      "matchingMethod": "Selected",
+      "groupByEntities": ["Account"]
+    }
+  },
+  "entityMappings": [
+    {
+      "entityType": "Account",
+      "fieldMappings": [{ "identifier": "AadUserId", "columnName": "UserId" }]
+    },
+    {
+      "entityType": "IP",
+      "fieldMappings": [{ "identifier": "Address", "columnName": "CurrentIP" }]
+    }
+  ]
+}

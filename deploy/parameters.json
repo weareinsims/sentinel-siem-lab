@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "value": "sentinel-siem-lab-ws"
+    },
+    "location": {
+      "value": "canadacentral"
+    },
+    "retentionDays": {
+      "value": 90
+    },
+    "workspaceSku": {
+      "value": "PerGB2018"
+    },
+    "tags": {
+      "value": {
+        "project": "sentinel-siem-lab",
+        "owner": "khizar-khan",
+        "environment": "lab"
+      }
+    }
+  }
+}
