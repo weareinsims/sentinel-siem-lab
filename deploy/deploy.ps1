@@ -1,10 +1,11 @@
-# ============================================================
-# Azure Sentinel SIEM Lab - Deployment Script
-# Author: Khizar Khan
-# Description: Deploys the full Sentinel lab environment
-#              including workspace, Sentinel, and detection rules
+# deploy.ps1
+# Khizar Khan
+#
+# Sets up the full Sentinel lab from scratch.
+# Creates the resource group, deploys the Log Analytics workspace,
+# enables Sentinel, and loads the detection rules.
+#
 # Usage: .\deploy.ps1 -SubscriptionId "<your-sub-id>"
-# ============================================================
 
 param(
     [Parameter(Mandatory = $true)]

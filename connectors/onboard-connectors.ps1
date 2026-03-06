@@ -1,13 +1,11 @@
-# ============================================================
-# Azure Sentinel SIEM Lab - Data Connector Onboarding
-# Author: Khizar Khan
-# Description: Enables key data connectors in Microsoft Sentinel
-#              - Windows Security Events (via AMA)
-#              - Azure Active Directory Sign-in Logs
-#              - Azure Activity
-#              - Microsoft Defender for Cloud
+# onboard-connectors.ps1
+# Khizar Khan
+#
+# Connects data sources to the Sentinel workspace.
+# Handles Azure AD sign-in/audit logs, Azure Activity logs,
+# and sets up a Data Collection Rule for Windows Security Events.
+#
 # Usage: .\onboard-connectors.ps1 -ResourceGroupName "rg-sentinel-siem-lab" -WorkspaceName "sentinel-siem-lab-ws"
-# ============================================================
 
 param(
     [Parameter(Mandatory = $true)]
