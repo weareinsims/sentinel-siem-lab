@@ -63,7 +63,7 @@ Write-Host "`n[3/5] Creating resource group '$ResourceGroupName'..." -Foreground
 
 $rgExists = az group exists --name $ResourceGroupName
 if ($rgExists -eq "true") {
-    Write-Host "  Resource group already exists — skipping." -ForegroundColor DarkGray
+    Write-Host "  Resource group already exists, skipping." -ForegroundColor DarkGray
 } else {
     az group create --name $ResourceGroupName --location $Location | Out-Null
     Write-Host "  Created: $ResourceGroupName ($Location)" -ForegroundColor Green
